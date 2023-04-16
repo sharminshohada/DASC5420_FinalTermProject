@@ -1,0 +1,178 @@
+---
+title: "T00710118_Shohada Sharmin_Final Term Project"
+output:
+  pdf_document: default
+  html_document: default
+date: "2023-04-11"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r, message=FALSE}
+pkg_list <- c("tidyverse","MASS", "ISLR","ISLR2", "dplyr", "caret","ModelMetrics",
+              "ggplot2", "corrplot" , "glmnet", "pwr")
+
+# Install packages if needed
+for (pkg in pkg_list)
+{
+  # Try loading the library.
+  if ( ! library(pkg, logical.return=TRUE, character.only=TRUE) )
+    {
+         # If the library cannot be loaded, install it; then load.
+        install.packages(pkg)
+        library(pkg, character.only=TRUE)
+  }
+}
+```
+
+
+```{r}
+my_train_data <- read.csv("C:/Users/sharm/Documents/train_titan.csv", stringsAsFactors = FALSE)
+my_test_data <- read.csv("C:/Users/sharm/Documents/test_titan.csv", stringsAsFactors = FALSE)
+
+
+# Define custom function to check for missing values
+my_nas <- function(x) {
+  sum(is.na(x))
+}
+
+# Check for missing values in the training data before preprocess
+sapply(my_train_data, my_nas)
+
+# Check for missing values in the test data before preprocess
+sapply(my_test_data, my_nas)
+
+
+
+library(ggplot2)
+# Visualize the survival rate by Passenger Class and Sex
+ggplot(my_train_data, aes(x = factor(Pclass), fill = factor(Survived))) +
+geom_bar(position = "fill", color = "black") +
+facet_wrap(~Sex, nrow = 1) +
+scale_fill_manual(values = c("#009E73", "#F0E442"), name = "Survived") +
+labs(title = "Survival by Ticket Class and Gender", x = "Ticket Class")
+
+# Summary statistics for numerical variables
+summary(my_train_data[, c("Fare", "Parch", "SibSp", "Age")])
+
+# Frequency table for categorical variables
+table(my_train_data$Sex)
+table(my_train_data$Embarked)
+
+# Correlation matrix
+cor(my_train_data[, c("Fare", "Parch", "SibSp", "Age")])
+
+# Remove unnecessary columns
+my_train_data <- select(my_train_data, -c(Cabin, Ticket, Name, PassengerId))
+my_test_data <- select(my_test_data, -c(Cabin, Ticket, Name, PassengerId))
+
+# Fill in missing values for Age and Fare columns with the median value
+my_train_data$Age[which(is.na(my_train_data$Age))] <- median(my_train_data$Age[!is.na(my_train_data$Age)])
+my_test_data$Age[which(is.na(my_test_data$Age))] <- median(my_test_data$Age[!is.na(my_test_data$Age)])
+my_test_data$Fare[which(is.na(my_test_data$Fare))] <- median(my_test_data$Fare[!is.na(my_test_data$Fare)])
+
+# Convert all non-numeric variables to factor variables in both train and test datasets
+my_train_data <- my_train_data %>% mutate_if(.predicate = function(x) !is.numeric(x), .funs = factor)
+my_test_data <- my_test_data %>% mutate_if(.predicate = function(x) !is.numeric(x), .funs = factor)
+
+
+# Convert Survived column in my_train_data to factor (0/1)
+my_train_data$Survived <- as.factor(my_train_data$Survived)
+
+# Impute missing values in the training and test data
+preproc <- preProcess(my_train_data %>% select(-Survived), method = c("center", "scale", "knnImpute"))
+train_data_proc <- predict(preproc, my_train_data %>% select(-Survived))
+train_data_proc$Survived <- my_train_data$Survived
+
+```
+
+```{r}
+# Check for missing values after process missing value
+colSums(is.na(my_train_data))
+colSums(is.na(my_test_data))
+
+# Check for outliers before process for numerical variable Age and Fare
+boxplot(my_train_data$Age, my_train_data$Fare, horizontal = TRUE, main = "Age and Fare Boxplot to check outliers")
+
+```
+
+
+
+```{r}
+# Remove outliers
+my_train_data <- my_train_data[my_train_data$Fare < quantile(my_train_data$Fare, 0.99) & my_train_data$Age < quantile(my_train_data$Age, 0.99),]
+
+
+# Set up cross-validation
+trctrl <- trainControl(method = "cv", number = 10)
+
+# Train logistic regression model using cross-validation
+logit_fit <- train(Survived ~ ., data = train_data_proc, method = "glm", trControl = trctrl)
+
+# Print results
+print(logit_fit)
+
+# Train a random forest model using k-fold cross-validation.
+rf_fit <- train(Survived ~ ., data = train_data_proc, method = "rf", trControl = trctrl)
+
+# Print results
+print(rf_fit)
+
+```
+
+
+
+
+```{r}
+library(lattice)
+
+# Compare model performance using resamples
+compare_models <- resamples(list(Logistic_Regression = logit_fit, Random_Forest = rf_fit))
+
+
+# Extract variable importance from random forest model
+var_imp <- varImp(rf_fit)
+
+# Plot variable importance
+ggplot(var_imp, aes(x = Importance, y = Reordered_names)) +
+  geom_point(size = 3) +
+  labs(title = "Variable Importance in Random Forest Model", x = "Importance", y = "Variable") +
+  theme_bw()
+
+# Summarize results
+summary(compare_models)
+
+# Plot results
+bwplot(compare_models, layout = c(1,2), ylab = "ROC",
+       main = "Model Performance Comparison", 
+       auto.key = list(space = "right", columns = 2))
+
+```
+
+```{r}
+# Make predictions of survival on test data set
+test_data_proc <- predict(preproc, my_test_data)
+predictions_survive <- predict(rf_fit, test_data_proc)
+
+# Save predictions of survival to file for test data
+id_range <- seq(from = 892, to = 1309)
+output <- data.frame(PassengerId = id_range, Survived = predictions_survive)
+write.csv(output, file = "predictions_survive.csv", row.names = FALSE)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
